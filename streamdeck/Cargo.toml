@@ -1,10 +1,8 @@
-[workspace]
-members = ["./streamdeck"]
-
 [package]
-name = "streamdeck-control"
+name = "streamdeck"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 hidapi = "2"
+thiserror = "1"
