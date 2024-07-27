@@ -6,9 +6,8 @@ static COMMAND_REV1_FIRMWARE_VERSION: u8 = 0x04;
 static COMMAND_REV1_BRIGHTNESS: [u8; 5] = [0x05, 0x55, 0xaa, 0xd1, 0x01];
 
 fn main() {
-    // perhaps this is necessary
+    
     let hidapi = hidapi::HidApi::new().unwrap();
-    // access - most sad
     let devices = hidapi.device_list().filter(|device_info| {
         device_info.vendor_id() == ELGATO_VENDOR_ID
             && device_info.product_id() == PID_STREAMDECK_MINI
@@ -19,7 +18,7 @@ fn main() {
     let device = devices.first().unwrap();
     let device = device.open_device(&hidapi).unwrap();
 
-    // attempt to get firmware version
+    // attempt to set display brightness
     let mut cmd: [u8; 17] = [0; 17];
     cmd[0..5].copy_from_slice(&COMMAND_REV1_BRIGHTNESS);
     cmd[5] = 100;
