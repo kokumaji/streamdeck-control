@@ -1,5 +1,5 @@
 [workspace]
-members = ["./streamdeck"]
+members = ["./streamdeck", "./streamdeck-gui/src-tauri"]
 
 [package]
 name = "streamdeck-control"
