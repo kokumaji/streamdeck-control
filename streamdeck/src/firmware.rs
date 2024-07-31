@@ -8,7 +8,7 @@ pub const FW_BMP_HEADER: [u8; 54] = [
 ];
 
 /// A trait for firmware information.
-pub trait Firmware {
+pub trait Firmware: Send + Sync {
     /// The offset of the firmware version in the feature report.
     fn version_offset() -> usize;
 

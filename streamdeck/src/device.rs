@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use hidapi::HidDevice;
 
@@ -31,6 +32,22 @@ pub struct Device<I: DeviceInfo<F>, F: Firmware> {
     buf: Arc<Mutex<[u8; 32]>>,
     __device: PhantomData<F>,
     __info: PhantomData<I>,
+}
+
+// The Windows HID API is not thread-safe. Thankfully, we aren't stupid and so aren't using Windows.
+
+unsafe impl<I, F> Send for Device<I, F>
+where
+    I: DeviceInfo<F>,
+    F: Firmware,
+{
+}
+
+unsafe impl<I, F> Sync for Device<I, F>
+where
+    I: DeviceInfo<F>,
+    F: Firmware,
+{
 }
 
 impl<I, F> Device<I, F>
@@ -97,10 +114,25 @@ where
     pub fn set_brightness(&self, brightness: u8) -> Result<(), Error> {
         self.send_command(&F::brightness_command(), &[brightness])
     }
+
+    /// Fades the brightness of the device.
+    pub async fn fade_brightness(&self, from: u8, to: u8, duration: Duration) {
+        let steps = from - to;
+        let delay = duration / steps as u32;
+        let step = (to as f32 - from as f32) / steps as f32;
+
+        for i in 0..steps {
+            let brightness = (from as f32 + step * i as f32) as u8;
+            self.set_brightness(brightness).unwrap();
+            tokio::time::sleep(delay).await;
+        }
+
+        self.set_brightness(to).unwrap();
+    }
 }
 
 /// A trait defining the device info.
-pub trait DeviceInfo<F: Firmware> {
+pub trait DeviceInfo<F: Firmware>: Send + Sync {
     /// Get the vendor ID of the device.
     fn vendor_id() -> u16;
 
