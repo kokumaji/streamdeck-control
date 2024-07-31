@@ -1,24 +1,22 @@
 //! Device-related functionality.
 
-use core::panic;
-use std::sync::{Arc, Mutex, MutexGuard};
-use tokio::time::{sleep, Duration};
-use hidapi::{DeviceInfo, HidApi, HidDevice, HidError};
-use Vendors::ELGATO;
+use std::marker::PhantomData;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use crate::device_lookup::{get_hid_device, get_hid_device_from_path};
-use crate::{error::Error, firmware::{Firmware, FirmwareV1}};
+use hidapi::HidDevice;
 
-pub enum CommandArg {
-    Single(u8),
-    Vec(Vec<u8>)
-}
+use crate::firmware::{Firmware, FirmwareV1};
+use crate::hid::{get_device, get_device_from_path};
+use crate::Error;
 
-pub mod Vendors {
+/// Vendor IDs for Stream Deck devices.
+pub mod vendors {
     pub const ELGATO: u16 = 0x0fd9;
 }
 
-pub mod StreamDeckId {
+/// Device IDs for Stream Deck devices.
+pub mod device_ids {
     pub const ORIGINAL: u16 = 0x0060;
     pub const ORIGINAL_V2: u16 = 0x006d;
     pub const MINI: u16 = 0x0063;
@@ -27,123 +25,155 @@ pub mod StreamDeckId {
     pub const REVISED_MINI: u16 = 0x0090;
 }
 
-/// A trait representing a device implementing a particular firmware.
-pub trait Device<F>
+/// A Stream Deck device.
+#[derive(Debug, Clone)]
+pub struct Device<I: DeviceInfo<F>, F: Firmware> {
+    inner: Arc<HidDevice>,
+    buf: Arc<Mutex<[u8; 32]>>,
+    __device: PhantomData<F>,
+    __info: PhantomData<I>,
+}
+
+// The Windows HID API is not thread-safe. Thankfully, we aren't stupid and so aren't using Windows.
+
+unsafe impl<I, F> Send for Device<I, F>
 where
+    I: DeviceInfo<F>,
     F: Firmware,
 {
-    /// Returns the inner HID device.
-    fn get_inner(&self) -> MutexGuard<HidDevice>;
-
-    /// Get the firmware version of the device.
-    fn get_firmware_version(&self) -> Result<String, Error> {
-        F::get_firmware_version(&self.get_inner())
-    }
-
-    fn connect(hid_path: Option<String>) -> Self;
-
-    fn send_cmd(&self, command: Vec<u8>, args: Option<CommandArg>) {
-        if command.len() > 17 {
-            panic!("Command Array too Large.");
-        }
-
-        let mut cmd: [u8; 17] = [0; 17];
-        cmd[0..command.len()].copy_from_slice(&command);
-
-        if let Some(parsed_args) = args {
-            let start = command.len();
-
-            match parsed_args {
-                CommandArg::Single(value) => {
-                    cmd[start] = value;
-                },
-                CommandArg::Vec(value) => {
-                    if value.len() > cmd.len() - 1 || start + value.len() > cmd.len() {
-                        panic!("Command Arguments Array too Large.")
-                    }
-                    cmd[start..start + value.len()].copy_from_slice(&value); 
-                }
-            }
-        }
-
-        self.get_inner().send_feature_report(&cmd).unwrap();
-
-    }
-
-    /**
-     * fades device brightness from start percentage to end percentage in milliseconds
-     */
-    async fn fade_brightness(&self, start: u8, end: u8, duration: u16, steps: u8) {
-        let start = start.clamp(0, 100);
-        let end = end.clamp(start, 100);
-
-        let steps = steps.clamp(0, 250);
-        let interval = duration as u64 / steps as u64;
-
-        // Determine the step size for brightness change
-        let step_size = if start < end {
-            (end - start) / steps
-        } else {
-            (start - end) / steps
-        };
-
-        let mut current_brightness = start;
-
-        for _ in 0..steps {
-            // Adjust brightness
-            self.set_brightness(current_brightness);
-
-            // Wait for the interval before changing to the next step
-            sleep(Duration::from_millis(interval)).await;
-
-            // Update brightness for the next step
-            if start < end {
-                current_brightness = (current_brightness + step_size).clamp(0, 100);
-            } else {
-                current_brightness = (current_brightness - step_size).clamp(0, 100);
-            }
-        }
-
-        // Ensure the final brightness is set
-        self.set_brightness(end);
-
-    }
-
-    fn set_brightness(&self, mut brightness: u8) {
-        // this is v1 only for now
-        if brightness > 100 {
-            brightness = 100;
-        }
-
-        self.send_cmd(COMMAND_REV1_BRIGHTNESS.to_vec(), Some(CommandArg::Single(brightness)))
-
-    }
-
 }
 
-static COMMAND_REV1_BRIGHTNESS: [u8; 5] = [0x05, 0x55, 0xaa, 0xd1, 0x01];
-static COMMAND_REV1_RESET: [u8; 2] = [0x0b, 0x63];
+unsafe impl<I, F> Sync for Device<I, F>
+where
+    I: DeviceInfo<F>,
+    F: Firmware,
+{
+}
+
+impl<I, F> Device<I, F>
+where
+    I: DeviceInfo<F>,
+    F: Firmware,
+{
+    /// Open a Stream Deck device.
+    pub fn open() -> Result<Self, Error> {
+        Ok(Self {
+            inner: get_device(I::vendor_id(), I::product_id())?.into(),
+            buf: Arc::new(Mutex::new([0; 32])),
+            __device: PhantomData,
+            __info: PhantomData,
+        })
+    }
+
+    /// Open a Stream Deck device by path.
+    pub fn open_path(path: String) -> Result<Self, Error> {
+        Ok(Self {
+            inner: get_device_from_path(I::vendor_id(), I::product_id(), path)?.into(),
+            buf: Arc::new(Mutex::new([0; 32])),
+            __device: PhantomData,
+            __info: PhantomData,
+        })
+    }
+
+    /// Write data to the firmware buffer.
+    fn write_command(&self, command: &[u8], args: &[u8]) -> Result<(), Error> {
+        let mut buf = *self.buf.lock().map_err(|_| Error::MutexLockError)?;
+
+        // check bounds
+        if command.len() + args.len() > F::buffer_size() {
+            return Err(Error::CommandSizeError);
+        }
+
+        // copy into buffer
+        buf.copy_from_slice(command);
+        buf[command.len()..command.len() + args.len()].copy_from_slice(args);
+
+        // fill the rest with zeros
+        for i in command.len() + args.len()..F::buffer_size() {
+            buf[i] = 0;
+        }
+
+        Ok(())
+    }
+
+    /// Send a command to the device.
+    fn send_command(&self, command: &[u8], data: &[u8]) -> Result<(), Error> {
+        self.write_command(command, data)?;
+        let buf = *self.buf.lock().map_err(|_| Error::MutexLockError)?;
+        Ok(self.inner.send_feature_report(&buf)?)
+    }
+
+    /// Send a command to the device and read the response.
+    fn read_command(&self, command: &[u8], data: &[u8]) -> Result<(), Error> {
+        self.write_command(command, data)?;
+        let mut buf = *self.buf.lock().map_err(|_| Error::MutexLockError)?;
+        Ok(self.inner.get_feature_report(&mut buf).map(|_| ())?)
+    }
+
+    /// Sets the brightness of the device.
+    pub fn set_brightness(&self, brightness: u8) -> Result<(), Error> {
+        self.send_command(&F::brightness_command(), &[brightness])
+    }
+
+    /// Fades the brightness of the device.
+    pub async fn fade_brightness(&self, from: u8, to: u8, duration: Duration) {
+        let steps = from - to;
+        let delay = duration / steps as u32;
+        let step = (to as f32 - from as f32) / steps as f32;
+
+        for i in 0..steps {
+            let brightness = (from as f32 + step * i as f32) as u8;
+            self.set_brightness(brightness).unwrap();
+            tokio::time::sleep(delay).await;
+        }
+
+        self.set_brightness(to).unwrap();
+    }
+}
+
+/// A trait defining the device info.
+pub trait DeviceInfo<F: Firmware>: Send + Sync {
+    /// Get the vendor ID of the device.
+    fn vendor_id() -> u16;
+
+    /// Get the product ID of the device.
+    fn product_id() -> u16;
+}
+
+/// A utility trait for connecting to devices. `Self::open()` is identical to `Device::<Self, F>::open()`.
+pub trait Connect<F>: DeviceInfo<F>
+where
+    Self: Sized,
+    F: Firmware,
+{
+    /// Open a device.
+    fn open() -> Result<Device<Self, F>, Error> {
+        Device::<Self, F>::open()
+    }
+
+    /// Open a device by path.
+    fn open_path(path: String) -> Result<Device<Self, F>, Error> {
+        Device::<Self, F>::open_path(path)
+    }
+}
+
+/// Blanket implementation for all devices.
+impl<I, F> Connect<F> for I
+where
+    I: DeviceInfo<F>,
+    F: Firmware,
+{
+}
 
 /// A Stream Deck Mini device.
-pub struct StreamDeckMini {
-    hid_device: Arc<Mutex<HidDevice>>
+pub struct StreamDeckMini;
+
+impl DeviceInfo<FirmwareV1> for StreamDeckMini {
+    fn vendor_id() -> u16 {
+        vendors::ELGATO
+    }
+
+    fn product_id() -> u16 {
+        device_ids::MINI
+    }
 }
-
-impl Device<FirmwareV1> for StreamDeckMini {
-    fn get_inner(&self) -> MutexGuard<HidDevice> {
-        self.hid_device.lock().unwrap()
-    }
-
-    fn connect(hid_path: Option<String>) -> Self  {
-        let api = HidApi::new().unwrap();
-
-        let device = match hid_path {
-            Some(s) => get_hid_device_from_path(&api, ELGATO, StreamDeckId::MINI, s),
-            _ => get_hid_device(&api, ELGATO, StreamDeckId::MINI)
-        };
-
-        StreamDeckMini { hid_device: Arc::new(Mutex::new(device.unwrap())) }
-
-    }
-
-}   

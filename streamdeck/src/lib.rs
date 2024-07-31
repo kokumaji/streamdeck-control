@@ -1,10 +1,9 @@
 //! Stream Deck firmware library for Rust.
 
-pub mod device;
+mod device;
 mod error;
 mod firmware;
-mod device_lookup;
+mod hid;
 
-pub use device::{Device, StreamDeckMini};
+pub use device::{Connect, Device, StreamDeckMini};
 pub use error::Error;
-pub use firmware::{Firmware, FirmwareV1, FirmwareV2};
