@@ -1,6 +1,8 @@
 //! Device-related functionality.
 
 use core::{panic};
+use std::ops::Deref;
+use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::time::{sleep, Duration};
 use tokio::runtime::Runtime;
 use hidapi::{HidDevice, HidError};
@@ -29,11 +31,11 @@ where
     F: Firmware,
 {
     /// Returns the inner HID device.
-    fn get_inner(&self) -> &HidDevice;
+    fn get_inner(&self) -> MutexGuard<HidDevice>;
 
     /// Get the firmware version of the device.
     fn get_firmware_version(&self) -> Result<String, Error> {
-        F::get_firmware_version(self.get_inner())
+        F::get_firmware_version(&self.get_inner())
     }
 
     fn new() -> Self;
@@ -126,12 +128,12 @@ static COMMAND_REV1_RESET: [u8; 2] = [0x0b, 0x63];
 
 /// A Stream Deck Mini device.
 pub struct StreamDeckMini {
-    hid_device: HidDevice
+    hid_device: Arc<Mutex<HidDevice>>
 }
 
 impl Device<FirmwareV1> for StreamDeckMini {
-    fn get_inner(&self) -> &HidDevice {
-        return &self.hid_device;
+    fn get_inner(&self) -> MutexGuard<HidDevice> {
+        self.hid_device.lock().unwrap()
     }
 
     fn new() -> Self {
@@ -141,7 +143,7 @@ impl Device<FirmwareV1> for StreamDeckMini {
             PID_STREAMDECK_MINI
         ).unwrap(); // You may need to adjust this based on HidDevice’s API.
         StreamDeckMini {
-            hid_device: device
+            hid_device: Arc::new(Mutex::new(device))
         }
     }
 

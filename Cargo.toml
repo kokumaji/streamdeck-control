@@ -8,3 +8,5 @@ edition = "2021"
 
 [dependencies]
 hidapi = "2"
+image = "0.25.2"
+rand = "0.8"
