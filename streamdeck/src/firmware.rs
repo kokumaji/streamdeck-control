@@ -1,9 +1,5 @@
 //! Defines firmware traits and implementations for Stream Deck devices.
 
-use hidapi::HidDevice;
-
-use crate::error::Error;
-
 pub const FW_BMP_HEADER: [u8; 54] = [
     0x42, 0x4d, 0xf6, 0x3c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00, 0x28, 0x00,
     0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x01, 0x00, 0x18, 0x00, 0x00, 0x00,
@@ -11,63 +7,32 @@ pub const FW_BMP_HEADER: [u8; 54] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
-/// The firmware trait represents the firmware of a Stream Deck device.
+/// A trait for firmware information.
 pub trait Firmware {
-    type FeatureReportBuffer: AsRef<[u8]>;
-    type FeatureReportBufferMut: AsMut<[u8]>;
-
     /// The offset of the firmware version in the feature report.
-    fn get_firmware_version_offset() -> usize;
+    fn version_offset() -> usize;
 
-    /// Get the firmware version of the device.
-    fn get_firmware_version(device: &HidDevice) -> Result<String, Error> {
-        let mut buf = [0; 17];
-        device.get_feature_report(buf.as_mut())?;
-        let version =
-            String::from_utf8_lossy(&buf[Self::get_firmware_version_offset()..]).into_owned();
-        Ok(version)
-    }
+    /// The size of the buffer.
+    fn buffer_size() -> usize;
 
-    /// Send a raw command to the device.
-    fn send_feature_report(
-        device: &HidDevice,
-        raw: Self::FeatureReportBuffer,
-    ) -> Result<(), Error> {
-        device.send_feature_report(raw.as_ref())?;
-        Ok(())
-    }
-
-    /// Send a raw command to the device and receive a response. The response is written to the
-    /// same buffer as the command.
-    fn get_feature_report(
-        device: &HidDevice,
-        mut raw: Self::FeatureReportBufferMut,
-    ) -> Result<(), Error> {
-        device.get_feature_report(raw.as_mut())?;
-        Ok(())
-    }
+    /// The brightness command.
+    fn brightness_command() -> &'static [u8];
 }
 
 /// Firmware implementation for the first version of the Stream Deck firmware.
 pub struct FirmwareV1;
 
 impl Firmware for FirmwareV1 {
-    type FeatureReportBuffer = [u8; 17];
-    type FeatureReportBufferMut = [u8; 17];
-
-    fn get_firmware_version_offset() -> usize {
+    fn version_offset() -> usize {
         5
     }
-}
 
-pub struct FirmwareMini;
+    fn buffer_size() -> usize {
+        17
+    }
 
-impl Firmware for FirmwareMini {
-    type FeatureReportBuffer = [u8; 17];
-    type FeatureReportBufferMut = [u8; 17];
-
-    fn get_firmware_version_offset() -> usize {
-        5
+    fn brightness_command() -> &'static [u8] {
+        &[0x05, 0x55, 0xaa, 0xd1, 0x01]
     }
 }
 
@@ -75,10 +40,15 @@ impl Firmware for FirmwareMini {
 pub struct FirmwareV2;
 
 impl Firmware for FirmwareV2 {
-    type FeatureReportBuffer = [u8; 32];
-    type FeatureReportBufferMut = [u8; 32];
-
-    fn get_firmware_version_offset() -> usize {
+    fn version_offset() -> usize {
         6
+    }
+
+    fn buffer_size() -> usize {
+        32
+    }
+
+    fn brightness_command() -> &'static [u8] {
+        &[0x05, 0x55, 0xaa, 0xd1, 0x01]
     }
 }
