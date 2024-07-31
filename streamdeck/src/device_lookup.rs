@@ -20,16 +20,23 @@ lazy_static! {
     static ref HID_API: Mutex<HidApi> = Mutex::new(HidApi::new().expect("Failed to create HidApi instance"));
 }
 
-pub fn get_hid_device(vendor_id: u16, product_id: u16) -> Result<HidDevice, Error> {
-    let mut api = HID_API.lock().map_err(|_| Error::MutexError)?;
-    api.refresh_devices().map_err(Error::HidError)?;
-
-    let devices = api.device_list().filter(|device_info| {
-        device_info.vendor_id() == vendor_id && device_info.product_id() == product_id
+pub fn get_hid_device(api: &HidApi, vendor_id: u16, product_id: u16) -> Result<HidDevice, Error> {
+    let devices = api.device_list().filter(|di| {
+        di.vendor_id() == vendor_id && di.product_id() == product_id
     }).collect::<Vec<_>>();
 
     let device = devices.first().unwrap().open_device(&api);
 
+    device.map_err(Error::HidError)
+
+}
+
+pub fn get_hid_device_from_path(api: &HidApi, vendor_id: u16, product_id: u16, path: String) -> Result<HidDevice, Error> {
+    let devices = api.device_list().filter(|di| {
+        di.vendor_id() == vendor_id && di.product_id() == product_id && di.path().to_string_lossy() == path
+    }).collect::<Vec<_>>();
+
+    let device = devices.first().unwrap().open_device(&api);
     device.map_err(Error::HidError)
 
 }

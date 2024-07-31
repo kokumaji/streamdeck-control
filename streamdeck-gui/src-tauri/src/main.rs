@@ -1,16 +1,16 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use streamdeck::{device, Device, StreamDeckMini};
+use streamdeck::{device::{self, StreamDeckId, Vendors::{self, ELGATO}}, Device, StreamDeckMini};
 
 #[tauri::command]
 async fn sd_set_brightness(brightness: u8) {
-    let device = StreamDeckMini::new();
+    let device = StreamDeckMini::connect(None);
     device.set_brightness(brightness)
 }
 
 #[tauri::command]
 async fn sd_fade_brightness(brightness: u8) {
-    let device = StreamDeckMini::new();
+    let device = StreamDeckMini::connect(None);
     device.fade_brightness(0, brightness, 2000, 10).await
 }
 

@@ -1,28 +1,30 @@
 //! Device-related functionality.
 
-use core::{panic};
-use std::ops::Deref;
+use core::panic;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::time::{sleep, Duration};
-use tokio::runtime::Runtime;
-use hidapi::{HidDevice, HidError};
-use once_cell::sync::Lazy;
+use hidapi::{DeviceInfo, HidApi, HidDevice, HidError};
+use Vendors::ELGATO;
 
-use crate::{
-    device_lookup, error::Error, firmware::{Firmware, FirmwareV1}
-};
+use crate::device_lookup::{get_hid_device, get_hid_device_from_path};
+use crate::{error::Error, firmware::{Firmware, FirmwareV1}};
 
-// Global runtime
-static GLOBAL_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap()
-});
 pub enum CommandArg {
     Single(u8),
     Vec(Vec<u8>)
+}
+
+pub mod Vendors {
+    pub const ELGATO: u16 = 0x0fd9;
+}
+
+pub mod StreamDeckId {
+    pub const ORIGINAL: u16 = 0x0060;
+    pub const ORIGINAL_V2: u16 = 0x006d;
+    pub const MINI: u16 = 0x0063;
+    pub const XL: u16 = 0x006c;
+    pub const MK2: u16 = 0x0080;
+    pub const REVISED_MINI: u16 = 0x0090;
 }
 
 /// A trait representing a device implementing a particular firmware.
@@ -38,7 +40,7 @@ where
         F::get_firmware_version(&self.get_inner())
     }
 
-    fn new() -> Self;
+    fn connect(hid_path: Option<String>) -> Self;
 
     fn send_cmd(&self, command: Vec<u8>, args: Option<CommandArg>) {
         if command.len() > 17 {
@@ -119,10 +121,6 @@ where
 
 }
 
-static ELGATO_VENDOR_ID: u16 = 0x0fd9;
-// perhaps we also need pid - most likely
-static PID_STREAMDECK_MINI: u16 = 0x0063;
-
 static COMMAND_REV1_BRIGHTNESS: [u8; 5] = [0x05, 0x55, 0xaa, 0xd1, 0x01];
 static COMMAND_REV1_RESET: [u8; 2] = [0x0b, 0x63];
 
@@ -136,15 +134,16 @@ impl Device<FirmwareV1> for StreamDeckMini {
         self.hid_device.lock().unwrap()
     }
 
-    fn new() -> Self {
-        // Create a default or placeholder HidDevice
-        let device = device_lookup::get_hid_device(
-            ELGATO_VENDOR_ID, 
-            PID_STREAMDECK_MINI
-        ).unwrap(); // You may need to adjust this based on HidDevice’s API.
-        StreamDeckMini {
-            hid_device: Arc::new(Mutex::new(device))
-        }
+    fn connect(hid_path: Option<String>) -> Self  {
+        let api = HidApi::new().unwrap();
+
+        let device = match hid_path {
+            Some(s) => get_hid_device_from_path(&api, ELGATO, StreamDeckId::MINI, s),
+            _ => get_hid_device(&api, ELGATO, StreamDeckId::MINI)
+        };
+
+        StreamDeckMini { hid_device: Arc::new(Mutex::new(device.unwrap())) }
+
     }
 
 }   

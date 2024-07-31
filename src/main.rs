@@ -1,3 +1,5 @@
+use std::{sync::{Arc, Mutex}, thread};
+use ab_glyph::{Font, FontRef};
 use image::{ImageBuffer, ImageReader, Rgb};
 use rand::Rng;
 
@@ -37,11 +39,11 @@ fn image_to_u8_array(img: &ImageBuffer<Rgb<u8>, Vec<u8>>) -> Vec<u8> {
 }
 
 fn main() {
-
+    
     let hidapi = hidapi::HidApi::new().unwrap();
     let devices = hidapi.device_list().filter(|device_info| {
         device_info.vendor_id() == ELGATO_VENDOR_ID
-            && device_info.product_id() == PID_STREAMDECK_MINI
+        && device_info.product_id() == PID_STREAMDECK_MINI
     }).collect::<Vec<_>>();
     
     let device = devices.first().unwrap();
@@ -71,7 +73,10 @@ fn main() {
     //     }
     // }
 
-    let image = image_to_u8_array(&img);
+    let font_bytes = include_bytes!("../fonts/OpenSans.ttf");
+    let font = FontRef::try_from_slice(font_bytes).unwrap();
+
+    imageproc::drawing::draw_text_mut(&mut img, Rgb([255, 0, 255]), 0, 0, 30.0, &font, "hrrrgfhfhghhghghhrhhrghghg");
 
     let mut bgr_buffer: Vec<u8> = Vec::with_capacity((width * height * 3) as usize);
 
@@ -128,7 +133,6 @@ fn main() {
                     }
                 }
             
-
                 if (key_pressed > 0) {
                     println!("Received Key Press {:?}", key_pressed);
                 } else {
